@@ -53,16 +53,28 @@ func (p *Packet) DataLen() []byte {
 	return dataLen
 }
 
-// Sender class.
-type Sender struct {
+
+type socket struct {
 	Host string
 	Port int
 }
 
+// Sender class.
+type Sender struct {
+	mainSocket socket 
+	reserveSocket socket
+}
+
 // Sender class constructor.
 func NewSender(host string, port int) *Sender {
-	s := &Sender{Host: host, Port: port}
-	return s
+	s := socket{Host: host, Port: port}
+	sender := &Sender{mainSocket: s}
+	return sender
+}
+
+func AddReserveSocket(sender *Sender, host string, port int) {
+	s := socket{Host: host, Port: port}
+	sender.reserveSocket = s
 }
 
 // Method Sender class, return zabbix header.
@@ -71,7 +83,7 @@ func (s *Sender) getHeader() []byte {
 }
 
 // Method Sender class, resolve uri by name:port.
-func (s *Sender) getTCPAddr() (iaddr *net.TCPAddr, err error) {
+func (s *socket) getTCPAddr() (iaddr *net.TCPAddr, err error) {
 	// format: hostname:port
 	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
 
@@ -86,7 +98,7 @@ func (s *Sender) getTCPAddr() (iaddr *net.TCPAddr, err error) {
 }
 
 // Method Sender class, make connection to uri.
-func (s *Sender) connect() (conn *net.TCPConn, err error) {
+func (sender *Sender) connect(isBackup bool) (conn *net.TCPConn, err error) {
 
 	type DialResp struct {
 		Conn  *net.TCPConn
@@ -94,6 +106,12 @@ func (s *Sender) connect() (conn *net.TCPConn, err error) {
 	}
 
 	// Open connection to zabbix host
+	var s socket
+	if !isBackup {
+		s = sender.mainSocket
+	} else {
+		s = sender.reserveSocket
+	}
 	iaddr, err := s.getTCPAddr()
 	if err != nil {
 		return
@@ -108,15 +126,15 @@ func (s *Sender) connect() (conn *net.TCPConn, err error) {
 	}()
 
 	select {
-	case <-time.After(5 * time.Second):
-		err = fmt.Errorf("Connection Timeout")
-	case resp := <-ch:
-		if resp.Error != nil {
-			err = resp.Error
-			break
-		}
+		case <-time.After(5 * time.Second):
+			err = fmt.Errorf("Connection Timeout")
+		case resp := <-ch:
+			if resp.Error != nil {
+				err = resp.Error
+				break
+			}
 
-		conn = resp.Conn
+			conn = resp.Conn
 	}
 
 	return
@@ -136,9 +154,14 @@ func (s *Sender) read(conn *net.TCPConn) (res []byte, err error) {
 
 // Method Sender class, send packet to zabbix.
 func (s *Sender) Send(packet *Packet) (res []byte, err error) {
-	conn, err := s.connect()
+	conn, err := s.connect(false)
 	if err != nil {
-		return
+		fmt.Printf("Error while connect to main Sender, try to use backup. Error: %s", err.Error())
+		conn, err = s.connect(true)
+		if err != nil {
+			err = fmt.Errorf("Error while connect to backup Sender. Error: %s", err.Error())
+			return
+		}
 	}
 	defer conn.Close()
 
