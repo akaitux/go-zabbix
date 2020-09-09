@@ -156,10 +156,17 @@ func (s *Sender) read(conn *net.TCPConn) (res []byte, err error) {
 func (s *Sender) Send(packet *Packet) (res []byte, err error) {
 	conn, err := s.connect(false)
 	if err != nil {
-		fmt.Printf("Error while connect to main Sender, try to use backup. Error: %s", err.Error())
-		conn, err = s.connect(true)
-		if err != nil {
-			err = fmt.Errorf("Error while connect to backup Sender. Error: %s", err.Error())
+		if s.reserveSocket.Host != "" {
+			fmt.Printf("Error while connect to main Sender, trying to use backup. Error: %s\n", err.Error())
+			conn, err = s.connect(true)
+			if err != nil {
+				fmt.Printf("Error while connect to backup Sender. Error: %s\n", err.Error())
+				return
+			} else {
+				fmt.Println("Backup is ok")
+			}
+		} else {
+			fmt.Printf("Error while connect to main Sender, Error: %s\n", err.Error())
 			return
 		}
 	}
